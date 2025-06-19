@@ -119,6 +119,9 @@ class UHFViewModel @Inject constructor(
                     val result = withContext(Dispatchers.IO) {
                         mReader?.init(context) == true
                     }
+                    mReader?.setPower(30)
+                    mReader?.setFastInventoryMode(true)
+
                     isInitializing = false
                     initMessage = if (result) "Init berhasil" else "Init gagal"
                 }
@@ -127,60 +130,117 @@ class UHFViewModel @Inject constructor(
     }
 
     // Fungsi untuk memulai scan RFID
+//    fun startRfidScanning() {
+//        if (isScanning) return
+//
+//
+//        stopBarcodeScan()
+//
+//        currentScanMode = ScanMode.RFID
+//        isScanning = true
+//
+//        viewModelScope.launch(Dispatchers.IO) {
+//            while (isScanning && currentScanMode == ScanMode.RFID) {
+//                println("HEHE")
+//                try {
+//                    println(mReader?.power)
+//                    val tag = mReader?.inventorySingleTag()
+//                    tag?.let {
+//                        withContext(Dispatchers.Main) {
+//                            setRfid(it.epc)
+//                            val existing = scannedRfidAll?.find { rfid -> rfid.epc == it.epc }
+//
+//                            scannedRfidAll = if (existing != null) {
+//                                scannedRfidAll?.map { rfid ->
+//                                    if (rfid.epc == it.epc) {
+//                                        rfid.copy(
+//                                            count = rfid.count + 1,
+//                                            timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+//                                        )
+//                                    } else rfid
+//                                }
+//                            } else {
+//                                scannedRfidAll?.plus(
+//                                    RfidTag(
+//                                        epc = it.epc,
+//                                        timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()),
+//                                        count = 1
+//                                    )
+//                                )
+//                            }
+//                            println("SCANNED DITAMBAHKAN : " + (scannedRfidAll?.size ?: 0))
+//
+//                            scanCount++
+//                            toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+//                        }
+//                    }
+//                } catch (e: Exception) {
+//                    Log.e("RFID", "Error during RFID scan: ${e.message}")
+//                    withContext(Dispatchers.Main) {
+//                        isScanning = false
+//                    }
+//                    return@launch
+//                }
+//                delay(10)
+//            }
+//        }
+//    }
+
     fun startRfidScanning() {
         if (isScanning) return
 
-
         stopBarcodeScan()
-
         currentScanMode = ScanMode.RFID
         isScanning = true
 
-        viewModelScope.launch(Dispatchers.IO) {
-            while (isScanning && currentScanMode == ScanMode.RFID) {
-                println("HEHE")
-                try {
-                    val tag = mReader?.inventorySingleTag()
-                    tag?.let {
-                        withContext(Dispatchers.Main) {
-                            setRfid(it.epc)
-                            val existing = scannedRfidAll?.find { rfid -> rfid.epc == it.epc }
+        // Bersihkan data
+        scannedRfidAll = emptyList()
+        scanCount = 0
 
-                            scannedRfidAll = if (existing != null) {
-                                scannedRfidAll?.map { rfid ->
-                                    if (rfid.epc == it.epc) {
-                                        rfid.copy(
-                                            count = rfid.count + 1,
-                                            timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                                        )
-                                    } else rfid
-                                }
-                            } else {
-                                scannedRfidAll?.plus(
-                                    RfidTag(
-                                        epc = it.epc,
-                                        timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()),
-                                        count = 1
-                                    )
+        // Set callback async untuk tag yang terdeteksi
+        mReader?.setInventoryCallback { tag ->
+            tag?.let {
+                viewModelScope.launch(Dispatchers.Main) {
+                    setRfid(it.epc)
+
+                    val existing = scannedRfidAll?.find { rfid -> rfid.epc == it.epc }
+
+                    scannedRfidAll = if (existing != null) {
+                        scannedRfidAll?.map { rfid ->
+                            if (rfid.epc == it.epc) {
+                                rfid.copy(
+                                    count = rfid.count + 1,
+                                    timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                                 )
-                            }
-                            println("SCANNED DITAMBAHKAN : " + (scannedRfidAll?.size ?: 0))
-
-                            scanCount++
-                            toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                            } else rfid
                         }
+                    } else {
+                        scannedRfidAll?.plus(
+                            RfidTag(
+                                epc = it.epc,
+                                timestamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()),
+                                count = 1
+                            )
+                        )
                     }
-                } catch (e: Exception) {
-                    Log.e("RFID", "Error during RFID scan: ${e.message}")
-                    withContext(Dispatchers.Main) {
-                        isScanning = false
-                    }
-                    return@launch
+
+                    println("SCANNED DITAMBAHKAN : " + (scannedRfidAll?.size ?: 0))
+
+                    scanCount++
+                    toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
                 }
-                delay(100)
             }
         }
+
+        // Mulai inventory
+        val started = mReader?.startInventoryTag() ?: false
+        if (!started) {
+            isScanning = false
+        }
     }
+
+
+
     fun clearRfidAll(){
         scannedRfidAll = emptyList()
         scanCount = 0
@@ -188,30 +248,62 @@ class UHFViewModel @Inject constructor(
 
     // Fungsi untuk memulai scan RFID sekali
     fun startRfidScanningOnce() {
+//        if (isScanning) return
+//
+//        stopBarcodeScan()
+//
+//        currentScanMode = ScanMode.RFID
+//        isScanning = true
+//
+//        viewModelScope.launch(Dispatchers.IO) {
+//            try {
+//                val tag = mReader?.inventorySingleTag()
+//                tag?.let {
+//                    withContext(Dispatchers.Main) {
+//                        setRfid(it.epc)
+//                        toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+//                    }
+//                    Log.d("RFID", "RFID scanned once: ${it.epc}")
+//                }
+//            } catch (e: Exception) {
+//                Log.e("RFID", "Error during single RFID scan: ${e.message}")
+//            } finally {
+//                withContext(Dispatchers.Main) {
+//                    isScanning = false
+//                }
+//            }
+//        }
         if (isScanning) return
 
         stopBarcodeScan()
-
         currentScanMode = ScanMode.RFID
         isScanning = true
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val tag = mReader?.inventorySingleTag()
-                tag?.let {
-                    withContext(Dispatchers.Main) {
-                        setRfid(it.epc)
-                        toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-                    }
-                    Log.d("RFID", "RFID scanned once: ${it.epc}")
-                }
-            } catch (e: Exception) {
-                Log.e("RFID", "Error during single RFID scan: ${e.message}")
-            } finally {
-                withContext(Dispatchers.Main) {
-                    isScanning = false
+        // Bersihkan data
+        scannedRfidAll = emptyList()
+        scanCount = 0
+
+        // Set callback async untuk tag yang terdeteksi
+        mReader?.setInventoryCallback { tag ->
+            tag?.let {
+                viewModelScope.launch(Dispatchers.Main) {
+                    setRfid(it.epc)
+
+
+
+//                    println("SCANNED DITAMBAHKAN : " + (scannedRfidAll?.size ?: 0))
+
+//                    scanCount++
+                    toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
+                    stopScanning()
                 }
             }
+        }
+
+        // Mulai inventory
+        val started = mReader?.startInventoryTag() ?: false
+        if (!started) {
+            isScanning = false
         }
     }
 
@@ -246,6 +338,7 @@ class UHFViewModel @Inject constructor(
         isScanning = false
         stopRfidScanning()
         stopBarcodeScan()
+        mReader?.stopInventory()
     }
 
     // Stop RFID scanning saja
@@ -382,6 +475,11 @@ class UHFViewModel @Inject constructor(
                         Log.d("Barcode", "Barcode scanned successfully: $barcodeData")
 
                         _scannedBarcode.value = barcodeEntity.barcodeData
+//                        changeToBarcode(true)
+                        if(barcodeData!= "null" ||barcodeData != "" || barcodeData != null){
+                            changeToBarcode(false)
+
+                        }
                         Log.d("Barcode", "Update Success: ${_scannedBarcode.value}")
 
                         isScanning = false

@@ -45,13 +45,15 @@ object TjiwiColors {
 @Composable
 fun Registration(navController: NavController, viewModel: UHFViewModel) {
     val context = LocalContext.current
-    val scannedBarcode = viewModel.scannedBarcode
+//    val scannedBarcode = viewModel.scannedBarcode
+
+    val scannedBarcode by viewModel.scannedBarcode.collectAsState()
 
     Log.d("Composable", "Barcode in UI: ${scannedBarcode}")
 
-    LaunchedEffect(viewModel.scannedBarcode.value) {
-        if (viewModel.scannedBarcode.value.isNotEmpty()) {
-            Toast.makeText(context, "Scanned: $scannedBarcode", Toast.LENGTH_SHORT).show()
+    LaunchedEffect(scannedBarcode) {
+        if (scannedBarcode!= null) {
+//            Toast.makeText(context, "Scanned: $scannedBarcode", Toast.LENGTH_SHORT).show()
             viewModel.initUHF()
             viewModel.stopScanning()
             viewModel.changeScanModeToRfid()
@@ -67,6 +69,7 @@ fun Registration(navController: NavController, viewModel: UHFViewModel) {
         }
     }
     LaunchedEffect(Unit) {
+        viewModel.clearBarcodeResult()
         viewModel.initBarcode()
         viewModel.changeToBarcode()
         viewModel.changeIsSingleScan()
@@ -130,10 +133,10 @@ fun Registration(navController: NavController, viewModel: UHFViewModel) {
 
         // Submit Button
         SubmitButton(
-            barcodeText = scannedBarcode.value,
+            barcodeText = scannedBarcode,
             rfidText = viewModel.scannedRfid,
             onSubmit = {
-                if (scannedBarcode.value.isNotEmpty() && viewModel.scannedRfid.isNotEmpty()) {
+                if (scannedBarcode!=null && viewModel.scannedRfid!= null) {
                     Toast.makeText(
                         context,
                         "Berhasil Registrasi!\nBarcode: ${viewModel.scannedBarcode}\nRFID: ${viewModel.scannedRfid}",
@@ -285,13 +288,14 @@ private fun InputSection(
     onClearRfid: () -> Unit,
     onBarcodeClick: () -> Unit
 ) {
+    val scannedBarcode by viewModel.scannedBarcode.collectAsState()
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Barcode Input
         CustomTextField(
             viewModel = viewModel,
-            value = viewModel.scannedBarcode.value,
+            value = scannedBarcode,
             label = "Hasil Barcode",
             placeholder = "Tap untuk scan barcode",
             leadingIcon = Icons.Default.Home,
@@ -330,7 +334,7 @@ private fun CustomTextField(
     onClick: (() -> Unit)?
 ) {
     OutlinedTextField(
-        value = value,
+        value = value ?:"",
         onValueChange = { },
         label = { Text(label) },
         placeholder = { Text(placeholder) },
@@ -476,7 +480,7 @@ private fun SubmitButton(
     rfidText: String,
     onSubmit: () -> Unit
 ) {
-    val isComplete = barcodeText.isNotEmpty() && rfidText.isNotEmpty()
+    val isComplete = barcodeText != null && rfidText != null
 
     Button(
         onClick = onSubmit,
