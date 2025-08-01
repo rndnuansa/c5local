@@ -115,6 +115,32 @@ fun RfidSearchScreen(viewModel: UHFViewModel) {
     ) {
 
 
+        Button(
+            onClick = {viewModel.startLocation()},
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isScanning) TjiwiColors.Primary else TjiwiColors.Success,
+                contentColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(
+                imageVector = if (isScanning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Start Location",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    letterSpacing = (-1).sp,
+                    fontSize = 14.sp,
+                    color = Color.White,
+                )
+            )
+        }
         // Search Input Card
         SearchInputCard(
             searchEpc = searchEpc,
@@ -587,6 +613,7 @@ fun SearchResultsList(
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     itemsIndexed(tags) { index, tag ->
+
                         SearchTagItem(
                             tag = tag,
                             index = index + 1,
@@ -701,18 +728,31 @@ fun NoResultsState(searchQuery: String) {
     }
 }
 
-@Composable
+fun hexToString(hex: String): String {
+    return hex.chunked(2)
+        .mapNotNull {
+            try {
+                it.toInt(16).toChar()
+            } catch (e: Exception) {
+                null // skip karakter invalid
+            }
+        }
+        .joinToString("")
+        .trimEnd { it.code == 0 } // hilangkan padding null (hex "00")
+}@Composable
 fun SearchTagItem(
     tag: RfidSearchTag,
     index: Int,
     searchQuery: String
 ) {
+    val readableEpc = remember(tag.epc) { hexToString(tag.epc) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = if (tag.isMatched) 
-                TjiwiColors.Success.copy(alpha = 0.1f) 
-            else 
+            containerColor = if (tag.isMatched)
+                TjiwiColors.Success.copy(alpha = 0.1f)
+            else
                 TjiwiColors.SurfaceVariant
         ),
         shape = RoundedCornerShape(12.dp),
@@ -728,7 +768,6 @@ fun SearchTagItem(
             Row(
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Match indicator
                 if (tag.isMatched) {
                     Box(
                         modifier = Modifier
@@ -748,36 +787,37 @@ fun SearchTagItem(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                 }
-                
+
                 Column {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Text(
+                        text = readableEpc,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontWeight = if (tag.isMatched) FontWeight.Bold else FontWeight.SemiBold,
+                            fontSize = 14.sp,
+                            color = if (tag.isMatched) TjiwiColors.Success else TjiwiColors.OnSurface,
+                        ),
+                    )
+                    Text(
+                        text = "Hex: ${tag.epc}",
+                        fontSize = 10.sp,
+                        color = Color.Gray
+                    )
+                    if (tag.isMatched) {
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = tag.epc,
-                            style = MaterialTheme.typography.headlineMedium.copy(
-                                fontWeight = if (tag.isMatched) FontWeight.Bold else FontWeight.SemiBold,
-                                fontSize = 14.sp,
-                                color = if (tag.isMatched) TjiwiColors.Success else TjiwiColors.OnSurface,
+                            text = "EXACT MATCH",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontSize = 10.sp,
+                                color = TjiwiColors.Success,
+                                fontWeight = FontWeight.Bold
                             ),
+                            modifier = Modifier
+                                .background(
+                                    color = TjiwiColors.Success.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
                         )
-                        if (tag.isMatched) {
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "EXACT MATCH",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = 10.sp,
-                                    color = TjiwiColors.Success,
-                                    fontWeight = FontWeight.Bold
-                                ),
-                                modifier = Modifier
-                                    .background(
-                                        color = TjiwiColors.Success.copy(alpha = 0.2f),
-                                        shape = RoundedCornerShape(4.dp)
-                                    )
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
                     }
                     Text(
                         text = "Last scanned: ${tag.timestamp}",
@@ -788,7 +828,7 @@ fun SearchTagItem(
                     )
                 }
             }
-            
+
             Column(
                 horizontalAlignment = Alignment.End
             ) {

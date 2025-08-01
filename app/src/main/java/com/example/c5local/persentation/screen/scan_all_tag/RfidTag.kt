@@ -91,6 +91,10 @@ fun RfidScannerScreen(viewModel: UHFViewModel) {
                 hasData = it.isNotEmpty()
             )
         }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        WriteTagSection(viewModel = viewModel)
+
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -292,6 +296,81 @@ fun ScanningIndicator(isScanning: Boolean) {
                 shape = CircleShape
             )
     )
+}
+
+@Composable
+fun WriteTagSection(
+    viewModel: UHFViewModel
+) {
+    var inputText by remember { mutableStateOf("") }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = TjiwiColors.Surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                text = "Write to EPC",
+                style = MaterialTheme.typography.headlineSmall.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    color = TjiwiColors.OnSurface
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = inputText,
+                onValueChange = { inputText = it },
+                label = { Text("Text to write (e.g. ALD1283)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = TjiwiColors.Primary,
+                    cursorColor = TjiwiColors.Primary
+                )
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = {
+                    val result = viewModel.writeTagToEpc(inputText)
+                    statusMessage = if (result) {
+                        "✅ Success: $inputText written to tag"
+                    } else {
+                        "❌ Failed to write tag"
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TjiwiColors.Primary,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Write EPC")
+            }
+
+            statusMessage?.let {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = it,
+                    fontSize = 12.sp,
+                    color = if (it.startsWith("✅")) TjiwiColors.Success else TjiwiColors.Primary,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
 }
 
 @Composable

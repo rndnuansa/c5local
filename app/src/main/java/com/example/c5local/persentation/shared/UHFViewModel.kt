@@ -15,6 +15,10 @@ import com.rscja.barcode.BarcodeDecoder
 import com.rscja.barcode.BarcodeFactory
 import com.rscja.deviceapi.RFIDWithUHFUART
 import com.rscja.deviceapi.entity.BarcodeEntity
+import com.rscja.deviceapi.entity.RadarLocationEntity
+import com.rscja.deviceapi.interfaces.IUHF
+import com.rscja.deviceapi.interfaces.IUHFLocationCallback
+import com.rscja.deviceapi.interfaces.IUHFRadarLocationCallback
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +31,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
+
 
 enum class ScanMode {
     RFID,
@@ -96,6 +101,146 @@ class UHFViewModel @Inject constructor(
         sliderValue = rfidUseCases.getRfidPowerUseCase()
 //        initUHF()
 //        initBarcode()
+    }
+
+    fun stringToHexPadded(input: String): String {
+        val hex = input.toByteArray(Charsets.US_ASCII).joinToString("") {
+            String.format("%02X", it)
+        }
+
+        // Tambah padding jika panjangnya bukan kelipatan 4
+        val paddingNeeded = (4 - (hex.length % 4)) % 4
+        return hex + "0".repeat(paddingNeeded)
+    }
+
+    fun writeTagToEpcFromString(inputText: String, accessPassword: String = "00000000") {
+        val hexData = stringToHexPadded(inputText)
+
+        val success = mReader?.writeDataToEpc(accessPassword, hexData)
+
+        if (success == true) {
+            println("✅ Berhasil menulis EPC: $inputText -> $hexData")
+        } else {
+            println("❌ Gagal menulis EPC: $inputText -> $hexData")
+        }
+    }
+
+    fun convertStringToHexPadded(input: String): String {
+        val hex = input.toByteArray(Charsets.US_ASCII).joinToString("") {
+            String.format("%02X", it)
+        }
+        val pad = (4 - (hex.length % 4)) % 4
+        return hex + "0".repeat(pad)
+    }
+
+    fun hexToString(hex: String): String {
+        return hex.chunked(2) // pisah tiap 2 digit (1 byte)
+            .mapNotNull {
+                try {
+                    it.toInt(16).toChar()
+                } catch (e: Exception) {
+                    null
+                }
+            }
+            .joinToString("")
+            .trimEnd { it.code == 0 } // hilangkan null char padding
+    }
+
+
+    //    fun startLocation() {
+//        val callback = object : IUHFLocationCallback {
+//
+//            override fun getLocationValue(p0: Int, p1: Boolean) {
+//                print("HEHEHEHE " + p0)
+//                print("ASKLDJALSKDJ " + p1)
+//            }
+//        }
+//
+//        val success: Boolean = (mReader?.startLocation(
+//            context,
+//            "4E4349303031",
+//            IUHF.Bank_EPC,
+//            2,  // mulai dari word ke-2 (biasanya EPC data mulai dari offset 2)
+//            callback
+//        ) ?: Log.d("UHF", "Start Location: " )) as Boolean
+//
+//        print("AKSJDLALSDKJAS " + success)
+//    }
+    fun startLocation() {
+//        val radarCallback = object : IUHFRadarLocationCallback {
+//            fun onRadarLocationUpdate(distance: Float, angle: Float) {
+//                Log.d("UHF", "Radar update - Distance: $distance, Angle: $angle")
+//            }
+//
+//            override fun getLocationValue(p0: List<RadarLocationEntity?>?) {
+//                Log.d("UHF", "Radar update - Distance: $p0")
+//
+//            }
+//
+//            override fun getAngleValue(p0: Int) {
+//                Log.d("UHF", "Radar update - Distance: $p0")
+//
+//            }
+//        }
+//
+//        val success = mReader?.startRadarLocation(
+//            context,
+//            "4E4349303031", // EPC tag
+//            IUHF.Bank_EPC,
+//            2,  // offset EPC
+//            radarCallback
+//        )
+//
+//        Log.d("UHF", "Start Radar Location success? $success")
+//        val result = mReader?.readData("00000000",IUHF.Bank_USER,0,28)
+//
+//        if (result != null) {
+//            val readable = hexToString(result.toString())
+//            println("✅ Read Success: $readable (hex: $result)")
+//        } else {
+//            println("❌ Read Failed")
+//        }
+
+        val result = mReader?.writeData(
+            "00000000",
+            IUHF.Bank_USER,
+            0,
+            28,
+            stringToHexPadded(
+                "123ABC202501#BS325R24L317#1750911642#A00#001#001#xxxxxxxxx"
+            )
+        )
+
+        if (result == true) {
+            println("✅ Penulisan EPC berhasil!")
+        } else {
+            println("❌ Penulisan EPC gagal.")
+        }
+
+
+//        val result = mReader?.readData(
+//             "E2022F751",
+//            IUHF.Bank_EPC,  // bisa juga IUHF.Bank_USER, tidak penting karena filterCnt = 0
+//             0,
+//             0,               // TANPA FILTER
+//            "",            // kosongkan atau null
+//            IUHF.Bank_USER,       // lokasi data yang ingin dibaca
+//            0,                     // mulai dari word ke-0
+//             3                      // baca 3 word = 6 byte
+//        )
+//
+//        if (result != null) {
+//            val readable = hexToString(result)
+//            println("✅ Read success: $readable (hex: $result)")
+//        } else {
+//            println("❌ Read failed")
+//        }
+    }
+
+
+    fun writeTagToEpc(inputText: String, accessPassword: String = "00000000"): Boolean {
+        val hex = convertStringToHexPadded(inputText)
+        return mReader?.writeDataToEpc(accessPassword, hex) == true
     }
 
 
