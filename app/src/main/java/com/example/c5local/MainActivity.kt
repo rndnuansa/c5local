@@ -171,40 +171,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-//    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-//        // Key codes untuk trigger button (biasanya 139, 280, 293 untuk handheld scanner)
-//        if (keyCode == 139 || keyCode == 280 || keyCode == 293) {
-//            if (event?.repeatCount == 0) {
-//                println("HEHEI MASUK SINI")
-//                println(keyCode)
-//                handleScannerTrigger()
-//                return true
-//            }
-//        }
-//        return super.onKeyDown(keyCode, event)
-//    }
-//
-//    private fun handleScannerTrigger() {
-//        println(uhfViewModel.isScanning)
-//        if (!uhfViewModel.isScanning) {
-//            // Start scanning berdasarkan mode yang dipilih
-//            if (uhfViewModel.currentScanMode == ScanMode.BARCODE) {
-//                // Mode barcode
-////                uhfViewModel.startBarcodeScan()
-//            } else {
-//                // Mode RFID
-//                if (uhfViewModel.isSingleScan) {
-//                    uhfViewModel.startRfidScanningOnce()
-//                } else {
-//                    println("HEHEI MASUK START RFID SCANNING FULL")
-//                    uhfViewModel.startRfidScanning()
-//                }
-//            }
-//        } else {
-//            // Stop scanning
-//            uhfViewModel.sztopScanning()
-//        }
-//    }
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         // Key codes untuk trigger button (biasanya 139, 280, 293 untuk handheld scanner)
         if (keyCode == 139 || keyCode == 280 || keyCode == 293) {

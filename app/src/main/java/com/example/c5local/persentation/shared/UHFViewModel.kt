@@ -15,14 +15,18 @@ import com.rscja.barcode.BarcodeDecoder
 import com.rscja.barcode.BarcodeFactory
 import com.rscja.deviceapi.RFIDWithUHFUART
 import com.rscja.deviceapi.entity.BarcodeEntity
+import com.rscja.deviceapi.interfaces.IUHF
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -92,6 +96,29 @@ class UHFViewModel @Inject constructor(
     var isBarcodeScanned by mutableStateOf(false)
         private set
 
+    // [BARU] State untuk menyimpan hasil pembacaan reserved bank dan mengontrol dialog
+    var reservedBankData by mutableStateOf<String?>(null)
+        private set
+    var isReadingData by mutableStateOf(false)
+        private set
+
+    // [BARU] State untuk fitur trigger terus-menerus
+    var isContinuousTriggerActive by mutableStateOf(false)
+        private set
+    var continuousTriggerTargetEpc by mutableStateOf<String?>(null)
+        private set
+    private var continuousTriggerJob: Job? = null
+
+    // [BARU] State untuk fitur tulis data
+    var showWriteSheet by mutableStateOf(false)
+        private set
+    var tagToWrite by mutableStateOf<RfidTag?>(null)
+        private set
+    var writeStatus by mutableStateOf<String?>(null)
+        private set
+    var isWriting by mutableStateOf(false)
+        private set
+
     init{
         sliderValue = rfidUseCases.getRfidPowerUseCase()
 //        initUHF()
@@ -99,9 +126,178 @@ class UHFViewModel @Inject constructor(
     }
 
 
+    // [BARU] Fungsi untuk menampilkan/menyembunyikan bottom sheet
+    fun onWriteTagClicked(tag: RfidTag) {
+        stopContinuousTrigger() // Matikan LED jika sedang menyala
+        tagToWrite = tag
+        writeStatus = null // Hapus status lama
+        showWriteSheet = true
+    }
+
+    fun onDismissWriteSheet() {
+        showWriteSheet = false
+    }
+
+    // [BARU] Fungsi untuk menulis ulang EPC
+    fun writeNewEpc(oldEpc: String, newEpc: String) {
+        if (newEpc.length != 24) {
+            writeStatus = "Error: EPC baru harus terdiri dari 24 karakter Heksadesimal."
+            return
+        }
+        if (isWriting) return
+        isWriting = true
+        writeStatus = "Menulis EPC baru..."
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val result: Boolean
+            var message: String
+
+            try {
+                // Gunakan parameter filter yang sudah terbukti
+                val filterPtr = 32 // dalam BIT
+                val filterCnt = 96 // dalam BIT
+
+                // Panggil fungsi SDK yang benar untuk menulis EPC
+                result = mReader?.writeDataToEpc(
+                    "00000000",
+                    IUHF.Bank_EPC,
+                    filterPtr,
+                    filterCnt,
+                    oldEpc,
+                    newEpc
+                ) ?: false
+
+                message = if (result) "SUKSES: EPC berhasil diubah." else "GAGAL: Penulisan EPC gagal."
+
+            } catch (e: Exception) {
+                message = "ERROR: ${e.message}"
+            }
+
+            withContext(Dispatchers.Main) {
+                writeStatus = message
+                isWriting = false
+                // Mungkin perlu refresh list setelah ini
+            }
+        }
+    }
+
+    /**
+     * [DIUBAH] Fungsi ini sekarang menggunakan `writeData` yang benar, bukan `blockWriteData`.
+     */
+    fun writeUserData(targetEpc: String, id: String, status: String) {
+        if (isWriting) return
+        isWriting = true
+        writeStatus = "Menulis User Data..."
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val result: Boolean
+            var message: String
+
+            try {
+                // Buat JSON dari input field
+                val jsonData = "{\"id\":\"$id\",\"st\":\"$status\"}"
+                val hexData = jsonData.toByteArray(StandardCharsets.UTF_8).joinToString("") { "%02x".format(it) }
+                val byteCount = jsonData.toByteArray(StandardCharsets.UTF_8).size
+                val wordCount = (byteCount + 1) / 2
+                if (wordCount == 0) throw IllegalArgumentException("Data tidak boleh kosong.")
+
+                // Gunakan parameter filter yang sudah terbukti
+                val filterPtr = 32 // dalam BIT
+                val filterCnt = 96 // dalam BIT
+
+                // Panggil fungsi SDK yang benar untuk menulis ke bank USER
+                result = mReader?.writeData(
+                    "00000000",
+                    IUHF.Bank_EPC,
+                    filterPtr,
+                    filterCnt,
+                    targetEpc,
+                    IUHF.Bank_USER, // Tulis ke bank USER
+                    0,              // Mulai dari alamat 0
+                    wordCount,      // Jumlah word yang akan ditulis
+                    hexData         // Data dalam format Heksadesimal
+                ) ?: false
+
+                message = if (result) "SUKSES: User Data berhasil ditulis." else "GAGAL: Penulisan User Data gagal."
+
+            } catch (e: Exception) {
+                message = "ERROR: ${e.message}"
+            }
+
+            withContext(Dispatchers.Main) {
+                writeStatus = message
+                isWriting = false
+            }
+        }
+    }
+
+    fun clearWriteStatus() {
+        writeStatus = null
+    }
+
+
     fun setRfid(value: String){
         rfidResult = value
         scannedRfid = value
+    }
+
+
+    // [BARU] Fungsi utama untuk toggle On/Off trigger
+    fun toggleContinuousTrigger(epc: String) {
+        // Jika job sedang berjalan, hentikan.
+        if (continuousTriggerJob?.isActive == true) {
+            stopContinuousTrigger()
+        } else {
+            // Jika tidak ada job, mulai yang baru.
+            startContinuousTrigger(epc)
+        }
+    }
+
+    private fun startContinuousTrigger(epc: String) {
+        // Hentikan trigger lama jika ada, untuk memastikan hanya satu yang berjalan
+        stopContinuousTrigger()
+
+        isContinuousTriggerActive = true
+        continuousTriggerTargetEpc = epc
+
+        // Mulai coroutine baru untuk loop
+        continuousTriggerJob = viewModelScope.launch(Dispatchers.IO) {
+            Log.d("ContinuousTrigger", "Memulai trigger untuk EPC: $epc")
+            while (isActive) { // Loop akan berjalan selama job ini aktif
+                try {
+                    // Gunakan parameter yang sudah terbukti berhasil
+                    val filterPtr = 32 // dalam BIT
+                    val filterCnt = 96 // dalam BIT (untuk tag 96-bit)
+
+                    mReader?.readData(
+                        "00000000",
+                        IUHF.Bank_EPC,
+                        filterPtr,
+                        filterCnt,
+                        epc,
+                        IUHF.Bank_RESERVED,
+                        4,
+                        2
+                    )
+                    // Log untuk menandakan perintah dikirim
+                    Log.v("ContinuousTrigger", "Perintah trigger dikirim ke $epc")
+
+                    // Beri jeda agar tidak membanjiri reader
+                    delay(200) // delay 200ms
+
+                } catch (e: Exception) {
+                    Log.e("ContinuousTrigger", "Error di dalam loop: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun stopContinuousTrigger() {
+        continuousTriggerJob?.cancel() // Batalkan job
+        continuousTriggerJob = null
+        isContinuousTriggerActive = false
+        continuousTriggerTargetEpc = null
+        Log.d("ContinuousTrigger", "Trigger dihentikan.")
     }
 
     fun initUHF() {
@@ -188,8 +384,11 @@ class UHFViewModel @Inject constructor(
 
     fun startRfidScanning() {
         if (isScanning) return
-
+        stopContinuousTrigger()
         stopBarcodeScan()
+        if(mReader?.isInventorying == true){
+            stopScanning()
+        }
         currentScanMode = ScanMode.RFID
         isScanning = true
 
@@ -197,6 +396,7 @@ class UHFViewModel @Inject constructor(
         scannedRfidAll = emptyList()
         scanCount = 0
 
+//        mReader?.startInventoryTag()
         // Set callback async untuk tag yang terdeteksi
         mReader?.setInventoryCallback { tag ->
             tag?.let {
@@ -305,6 +505,134 @@ class UHFViewModel @Inject constructor(
         if (!started) {
             isScanning = false
         }
+    }
+
+    // =======================================================================
+    // === FUNGSI KHUSUS UNTUK DEBUGGING PARAMETER FILTER ===
+    // =======================================================================
+    fun testFilterParameters(epc: String) {
+        if (isReadingData || isScanning) return
+        isReadingData = true
+        Log.d("FilterTest", "================== MEMULAI TES FILTER ==================")
+        Log.d("FilterTest", "Menggunakan EPC: $epc")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            var finalMessage = "Hasil Tes Filter:\n"
+            try {
+                // --- PARAMETER YANG AKAN KITA UBAH-UBAH ---
+                // Coba satu per satu dengan mengubah komentar (//)
+
+                // Percobaan 1: Standar (Pointer Word 2, Panjang Bit)
+//                val testFilterPtr = 2
+//                val testFilterCnt = epc.length * 4
+
+                // Percobaan 2: Pointer 0 (Smart SDK), Panjang Bit
+//                 val testFilterPtr = 0
+//                 val testFilterCnt = epc.length * 4
+
+                // Percobaan 3: Pointer Word 2, Panjang Word
+                 val testFilterPtr = 32
+                 val testFilterCnt = 96
+
+                // Percobaan 4: Pointer 0, Panjang Word
+//                 val testFilterPtr = 0
+//                 val testFilterCnt = epc.length / 4
+
+                Log.d("FilterTest", "Menguji dengan: filterPtr = $testFilterPtr, filterCnt = $testFilterCnt")
+
+
+                // --- Parameter untuk membaca EPC itu sendiri sebagai verifikasi ---
+                val accessPwd = "00000000"
+                val bankToRead = IUHF.Bank_RESERVED       // Kita coba baca bank EPC
+                val readPtr = 4                     // Alamat awal data EPC
+                val readCnt = 2         // Panjang EPC dalam word
+
+                val readResult = mReader?.readData(
+                    accessPwd,
+                    IUHF.Bank_EPC, // Filter berdasarkan EPC
+                    testFilterPtr,
+                    testFilterCnt,
+                    epc,           // Data EPC untuk filter
+                    bankToRead,
+                    readPtr,
+                    readCnt
+                )
+                Log.d("FilterTest", ">>> SUKSES! Hasil Baca: $readResult")
+
+
+                if (readResult != null) {
+                    Log.d("FilterTest", ">>> SUKSES! Hasil Baca: $readResult")
+                    if (readResult.equals(epc, ignoreCase = true)) {
+                        finalMessage += "BERHASIL!\nParameter yang benar ditemukan:\nfilterPtr = $testFilterPtr\nfilterCnt = $testFilterCnt"
+                        Log.d("FilterTest", ">>> VERIFIKASI BERHASIL! EPC yang dibaca sama dengan filter.")
+                    } else {
+                        finalMessage += "GAGAL VERIFIKASI.\nEPC yang dibaca ($readResult) tidak sama dengan EPC filter ($epc)."
+                        Log.w("FilterTest", ">>> VERIFIKASI GAGAL. Hasil baca tidak sesuai.")
+                    }
+                } else {
+                    finalMessage += "GAGAL.\nOperasi baca mengembalikan null dengan parameter:\nfilterPtr = $testFilterPtr\nfilterCnt = $testFilterCnt"
+                    Log.e("FilterTest", ">>> GAGAL. readData() mengembalikan null.")
+                }
+
+            } catch (e: Exception) {
+                finalMessage += "EXCEPTION: ${e.message}"
+                Log.e("FilterTest", ">>> EXCEPTION: ", e)
+            }
+
+            Log.d("FilterTest", "================== TES FILTER SELESAI ==================\n")
+
+            withContext(Dispatchers.Main) {
+                reservedBankData = finalMessage // Tampilkan hasil tes di dialog
+                isReadingData = false
+            }
+        }
+    }
+
+    // [BARU] Fungsi untuk membaca data dari reserved bank (untuk menyalakan LED)
+    fun readReservedBankForTag(epc: String) {
+        if (isReadingData || isScanning) return // Jangan jalankan jika sedang membaca atau scanning
+        isReadingData = true
+
+        viewModelScope.launch(Dispatchers.IO) {
+            var resultMessage: String
+
+            try {
+                Log.d("ReadData", "Attempting to read data for EPC: $epc")
+
+                val accessPwd = "00000000"
+                val filterBank = IUHF.Bank_EPC
+                val filterPtr = 0
+                val filterCnt =  epc.length * 4
+                val filterData = epc
+                val bank = IUHF.Bank_RESERVED
+                val ptr = 4
+                val cnt = 2
+
+                val readResult = mReader?.readData(accessPwd, filterBank, filterPtr, filterCnt, filterData, bank, ptr, cnt)
+                Log.d("ReadData", "asdasd: $readResult")
+
+                resultMessage = if (readResult != null) {
+                    Log.d("ReadData", "Successfully read data: $readResult")
+                    "Data untuk EPC:\n$epc\n\nHasil: $readResult"
+                } else {
+                    Log.e("ReadData", "Failed to read data. Method returned null.")
+                    "Gagal membaca data dari tag dengan EPC:\n$epc"
+                }
+            } catch (e: Exception) {
+                Log.e("ReadData", "Exception while reading data: ${e.message}", e)
+                resultMessage = "Error: ${e.message}"
+            }
+
+            withContext(Dispatchers.Main) {
+                reservedBankData = resultMessage
+                isReadingData = false
+            }
+        }
+    }
+
+    // [BARU] Fungsi untuk menutup dialog hasil pembacaan
+    fun dismissReadDataDialog() {
+        reservedBankData = null
     }
 
     // Fungsi untuk memulai scan barcode - DIPERBAIKI
@@ -421,51 +749,6 @@ class UHFViewModel @Inject constructor(
 
             // Set callback untuk menangani hasil scan
             barcodeDecoder?.setDecodeCallback(object : BarcodeDecoder.DecodeCallback {
-//                override fun onDecodeComplete(barcodeEntity: BarcodeEntity) {
-//                    try {
-//                        Log.d("Barcode", "Decode callback triggered - Result code: ${barcodeEntity.resultCode}")
-////                        Log.d("HEHEHHE",barcodeEntity.barcodeData)
-//                        val barcodeData = barcodeEntity.barcodeData
-//                        Log.d("Barcode", "Barcode scanned successfully: $barcodeData")
-//                        scannedBarcode = barcodeEntity.barcodeData
-////                        updateBarcode(barcodeEntity.barcodeData)
-//                        isScanning = false
-//                        isBarcodeScanned = true
-//
-//                        // Play beep sound
-//                        toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-//
-//                        // Stop barcode scanning dan switch ke RFID mode
-////                        stopBarcodeScan()
-////                        changeScanModeToRfid()
-//                        // Hanya proses jika sedang dalam mode barcode scanning
-////                        if (currentScanMode == ScanMode.BARCODE && isScanning) {
-////                            if (barcodeEntity.resultCode == BarcodeDecoder.DECODE_SUCCESS) {
-////                                val barcodeData = barcodeEntity.barcodeData
-////                                Log.d("Barcode", "Barcode scanned successfully: $barcodeData")
-////
-////                                viewModelScope.launch(Dispatchers.Main) {
-////                                    // Update barcode result
-////                                    updateBarcode(barcodeData)
-////                                    isBarcodeScanned = true
-////
-////                                    // Play beep sound
-////                                    toneGenerator.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-////
-////                                    // Stop barcode scanning dan switch ke RFID mode
-////                                    stopBarcodeScan()
-////                                    changeScanModeToRfid()
-////                                }
-////                            } else {
-////                                Log.d("Barcode", "Barcode scan failed with result code: ${barcodeEntity.resultCode}")
-////                            }
-////                        } else {
-////                            Log.d("Barcode", "Callback ignored - Mode: $currentScanMode, Scanning: $isScanning")
-////                        }
-//                    } catch (e: Exception) {
-//                        Log.e("Barcode", "Error in decode callback: ${e.message}")
-//                    }
-//                }
                 override fun onDecodeComplete(barcodeEntity: BarcodeEntity) {
                     try {
                         Log.d("Barcode", "Decode callback triggered - Result code: ${barcodeEntity.resultCode}")
@@ -610,6 +893,7 @@ class UHFViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         try {
+            stopContinuousTrigger()
             stopScanning()
             releaseBarcode()
             toneGenerator.release()
